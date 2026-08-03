@@ -21,47 +21,40 @@ held-out 评测的策略。
 
 <!-- truncate -->
 
-## 为 Policy 工程师准备的地下城
+## 通过 NLE 进入 NetHack
 
-NetHack 具有部分可观测、程序生成和长时程等特征。一个有效的 Policy 不仅需要探索
-房间与走廊，还需要理解消息、管理饥饿与背包、战斗或避开生物、处理交互提示，并
-找到通往地下城更深处的道路。
+NetHack 是一款经典的终端 Roguelike 游戏。玩家需要探索程序生成的地下城，战斗或
+避开怪物，应对饥饿与陷阱，管理装备和消耗品，并寻找通往更深层的道路。游戏的
+长期目标是取得 Yendor 护符并成功 ascend；但即使只想在前期推进，也需要在部分
+可观测条件下理解简短的文字消息，并连续做出大量相互关联的决策。
+
+NetHack Learning Environment（NLE）将这款游戏封装成面向 Agent 研究的 Python
+接口。本实验使用可独立安装的 distribution，接入 NLE 1.3.0 的
+`NetHackScore-v0`，底层为 NetHack 3.6.7。每个 Policy 会看到 21 × 79 的终端地图、
+具名状态值、当前消息、背包条目与输入模式，再从 23 个公开 NLE Actions 中选择
+动作。学习结果保存在可执行源代码中，包括地图记忆、移动规则、障碍处理、状态
+估计和探索策略，而不是变化的模型权重。
 
 很多失败并不会表现为程序崩溃。Policy 可能连续数千步撞击同一块巨石，反复尝试
 穿过铁栏，在两个格子之间振荡，或者站在楼梯上却不知道如何使用它。本实验检验
 Coding Agent 能否将这些执行证据转化为更好的策略系统。
 
-这个可独立安装的 distribution 接入了 NLE 1.3.0 的 `NetHackScore-v0`，底层使用
-NetHack 3.6.7。学习结果保存在可执行源代码中，包括地图记忆、移动规则、障碍处理、
-状态估计和探索策略，而不是变化的模型权重。
+## Environment 如何计算反馈分数
 
-## 原始证据与自主分析
-
-每个 Policy 都接收同样的有界语义状态：21 × 79 的终端地图、glyph 与颜色、具名
-状态值、当前消息、背包条目和输入模式。它可以从 23 个公开 NLE Actions 中选择，
-包括移动、奔跑、上下楼梯、等待、踢、进食和搜索。
-
-每次成功的训练 Submission 之后，Feedback 都包含：
-
-- 每个 Policy 可见的初始 observation 与 Action 后 observation，保存为压缩 NPZ；
-- 按顺序记录每个 transition 的 gzip JSONL 轨迹；
-- 聚合 return、游戏分数、地下城深度、Episode 长度、死亡、截断、失败和冻结步诊断。
-
-Environment 不会替 Agent 挑选“有趣”的 Episode、抽取画面、渲染视频或维护单独的
-人类观察数据流。Agent 自己决定检查哪些原始数组与轨迹、编写哪些分析脚本，以及
-在 `analysis/` 下保留哪些派生证据。
+Environment 使用 NLE 的 shaped score reward。每个 Action 的 reward 由 NetHack
+游戏分数的变化量构成；如果 NetHack 的 turn 计数没有前进，则额外加入固定的
+-0.01 冻结步惩罚。一个 Episode 的 return 是全部 step rewards 之和：
 
 ```text
-提交可执行 Policy
-        ↓
-获得完整原始训练轨迹
-        ↓
-由 Agent 自主检查与诊断
-        ↓
-重写地图记忆、寻路与 Action 规则
-        ↓
-提交另一个不可变 Program
+Episode return = Σ（游戏分数变化量 + 冻结步惩罚）
+冻结步惩罚 = NetHack turn 未前进时为 -0.01，否则为 0
+Benchmark score = Episode return 的平均值
 ```
+
+如果 Policy 执行失败，该 Episode 的 return 记为 -5,000，即 Episode horizon 的
+负值。Feedback 还会报告游戏分数、地下城深度、Episode 长度、死亡、截断、Policy
+failure 和冻结步比例。这些诊断信息可以区分真正的地下城推进，以及只是不断发出
+Actions、却没有推动游戏进程的 Policy。
 
 ## 实验协议
 
@@ -93,9 +86,7 @@ Assessment split 上进行测量。Validation 与 Assessment 只保留聚合结�
 
 ## Held-out 实验结果
 
-主分数是在 256 个 Assessment Episodes 上计算的 NLE shaped return 均值。它将
-NLE 游戏分数变化与每个冻结步固定 -0.01 的惩罚相结合。Policy 执行失败记为
--5000，即 Episode horizon 的负值。
+主分数是在 256 个 Assessment Episodes 上测得的上述 NLE shaped return 均值。
 
 | Agent 路线 | 使用的训练额度 | Submissions | Assessment | 平均游戏分数 | 平均 / 最大深度 | 冻结步 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -137,7 +128,6 @@ Actions 的代码中。Program 才是 Run 的持久结果。
 
 ## 发现与边界
 
-- 完整语义轨迹无需 Environment 编写专用 replay 接口，也能支持有效的 Policy 工程。
 - Return、游戏分数、深度、冻结比例、死亡与截断解释行为的不同方面；主分数负责
   排序 candidates，诊断信息负责解释结果。
 - 有界的公开训练批次存在噪声，因此私有 Validation 很重要。

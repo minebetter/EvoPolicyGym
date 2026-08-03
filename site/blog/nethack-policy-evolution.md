@@ -21,53 +21,46 @@ strategy, but to write one that could survive held-out evaluation on its own.
 
 <!-- truncate -->
 
-## A dungeon for policy engineers
+## NetHack through NLE
 
-NetHack is partially observable, procedurally generated, and long-horizon. A
-useful Policy must navigate rooms and corridors, respond to messages, manage
-hunger and inventory, fight or avoid creatures, handle interaction prompts,
-and find routes to deeper dungeon levels.
+NetHack is a classic terminal roguelike. The player explores a procedurally
+generated dungeon, fights or avoids monsters, survives hunger and traps,
+manages equipment and consumables, and searches for routes to deeper levels.
+The long-term objective is to recover the Amulet of Yendor and ascend, but even
+early progress requires interpreting terse messages and acting under partial
+observability across a long sequence of decisions.
+
+The NetHack Learning Environment (NLE) exposes that game as a Python interface
+for agent research. This independently installable distribution integrates NLE
+1.3.0 `NetHackScore-v0`, backed by NetHack 3.6.7. Every Policy sees a 21 × 79
+terminal map, named status values, the current message, inventory entries, and
+input mode, then chooses among 23 public NLE Actions. Learning is retained as
+executable source code—map memory, movement rules, obstacle handling, state
+estimation, and exploration strategy—not as changing model weights.
 
 Many failures are not clean crashes. A Policy may walk into one boulder for
-thousands of turns, repeatedly try to cross iron bars, oscillate between two
+thousands of steps, repeatedly try to cross iron bars, oscillate between two
 tiles, or stand on a staircase without using it. The experiment tests whether
 a coding agent can turn that execution evidence into a better strategy system.
 
-The independently installable distribution integrates NLE 1.3.0
-`NetHackScore-v0`, backed by NetHack 3.6.7. Learning is retained as executable
-source code—map memory, movement rules, obstacle handling, state estimation,
-and exploration strategy—not as changing model weights.
+## How the Environment scores feedback
 
-## Raw evidence, chosen analysis
-
-Every Policy receives the same bounded semantic state: a 21 × 79 terminal map,
-glyphs and colors, named status values, the current message, inventory entries,
-and input mode. It chooses among 23 public NLE Actions, including movement,
-running, stairs, waiting, kicking, eating, and searching.
-
-After each successful training submission, Feedback includes:
-
-- every Policy-visible initial and post-Action observation in compressed NPZ files;
-- every transition in ordered gzip JSONL trajectories; and
-- aggregate return, game score, dungeon depth, Episode length, deaths,
-  truncations, failures, and frozen-step diagnostics.
-
-The Environment does not choose interesting Episodes, sample frames, render a
-video, or maintain a separate human-observer feed. The Agent decides which raw
-arrays and trajectories to inspect, which analysis scripts to write, and which
-derived evidence to retain under `analysis/`.
+The Environment uses NLE's shaped score reward. Each Action contributes the
+change in NetHack game score and, when the NetHack turn counter does not
+advance, a constant frozen-step penalty of -0.01. The Episode return is the sum
+of those step rewards:
 
 ```text
-submit executable Policy
-        ↓
-complete raw training trajectories
-        ↓
-Agent-chosen inspection and diagnosis
-        ↓
-rewrite map memory, routing, and Action rules
-        ↓
-submit another immutable Program
+Episode return = Σ (game-score delta + frozen-step penalty)
+frozen-step penalty = -0.01 when the NetHack turn does not advance, else 0
+Benchmark score = mean Episode return
 ```
+
+A Policy execution failure receives a return of -5,000, the negative Episode
+horizon. Feedback also reports game score, dungeon depth, Episode length,
+deaths, truncations, Policy failures, and the frozen-step fraction. These
+diagnostics distinguish genuine dungeon progress from a Policy that merely
+keeps issuing Actions without advancing the game.
 
 ## Experiment protocol
 
@@ -100,9 +93,8 @@ feedback loop.
 
 ## Held-out results
 
-The primary score is mean shaped NLE return over 256 Assessment Episodes. It
-combines NLE game-score deltas with a constant -0.01 penalty for every frozen
-step. A Policy execution failure receives -5000, the negative Episode horizon.
+The primary score is the mean shaped NLE return defined above, measured over
+256 Assessment Episodes.
 
 | Agent lane | Training used | Submissions | Assessment | Mean game score | Mean / max depth | Frozen steps |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -150,8 +142,6 @@ durable result of the Run.
 
 ## Findings and boundaries
 
-- Complete semantic trajectories supported useful Policy engineering without
-  an Environment-authored replay interface.
 - Return, game score, depth, frozen fraction, deaths, and truncations explain
   different aspects of behavior; the primary score ranks candidates while the
   diagnostics explain them.
